@@ -5,7 +5,6 @@ Este repositório contém o serviço de Inteligência Artificial para a platafor
 Este serviço foi projetado para ser consumido pela API principal do BUFFS (desenvolvida em NestJS), atuando como o "cérebro" analítico do sistema.
 
 ##  Funcionalidades
-d
   - **Predição de Potencial Genético:** Estima características da prole (como produção de leite, saúde, etc.) com base nos dados dos pais.
   - **Simulação de Acasalamentos:** Permite que o usuário teste virtualmente um cruzamento entre um macho e uma fêmea para visualizar o potencial da cria.
   - **Recomendação de Cruzamentos (Roadmap):** Sugere os melhores acasalamentos para um conjunto de fêmeas, otimizando para objetivos específicos como maximização da produção ou minimização da consanguinidade.
