@@ -1,6 +1,15 @@
+# Framework da API
 fastapi
 uvicorn[standard]
-scikit-learn
+
+# Manipulação de Dados e Machine Learning
 pandas
+numpy
+scikit-learn
+joblib
+
+# Geração de Dados Fictícios
+Faker
+
+# Conexão com Banco de Dados (para o futuro)
 psycopg2-binary
-python-dotenv
