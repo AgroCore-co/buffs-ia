@@ -1,2 +1,12 @@
 .venv
 __pycache__
+*.csv
+*.joblib
+*.pkl
+*.pt
+*.pth
+*.pkl.gz
+*.pkl.bz2
+*.pkl.zip
+*.pkl.tar
+*.pkl.tar.gz
