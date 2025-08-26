@@ -1,6 +1,7 @@
 # =================================================================
-# ARQUIVO: main.py (VERSÃO 1.0.0 - Refatorado)
-# OBJETIVO: API limpa, sem duplicação e pronta para produção.
+# ARQUIVO: main.py (VERSÃO 1.0.0)
+# OBJETIVO: API para predição individual de produção de leite + 
+#           análise de consanguinidade e simulação de acasalamentos.
 # =================================================================
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -8,202 +9,317 @@ import pandas as pd
 import numpy as np
 import joblib
 import json
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
+from datetime import datetime
+
+# Importa módulos locais
+from app.models.prediction import (
+    fazer_predicao_producao_individual,
+    obter_informacoes_femea
+)
+from app.models.genealogia import (
+    criar_arvore_genealogica,
+    CalculadorConsanguinidade
+)
 
 # --- Bloco de Carregamento ---
-# Esta seção carrega todos os artefatos necessários na inicialização da API.
 model = None
 modelo_info = {}
-features_utilizadas = []
 df_historico_bufalos = pd.DataFrame()
 df_historico_ciclos = pd.DataFrame()
 df_historico_ordenhas = pd.DataFrame()
 df_historico_zootecnicos = pd.DataFrame()
-MEDIAS_PROPRIEDADE = {}
+df_historico_sanitarios = pd.DataFrame()
+df_historico_repro = pd.DataFrame()
 
 try:
-    print("Carregando modelo e dados para API...")
-    model = joblib.load('modelo_leite.joblib')
+    print("Carregando modelo individual e dados para API...")
     
-    with open('modelo_info.json', 'r') as f:
+    # Carrega modelo individual
+    model = joblib.load('modelo_producao_individual.joblib')
+    
+    # Carrega informações do modelo
+    with open('modelo_producao_individual_info.json', 'r') as f:
         modelo_info = json.load(f)
-    features_utilizadas = modelo_info.get('features', [])
-    print(f"Features do modelo: {features_utilizadas}")
     
-    df_historico_bufalos = pd.read_csv('bufalos.csv')
-    df_historico_ciclos = pd.read_csv('ciclos_lactacao.csv', parse_dates=['dt_parto'])
+    # Carrega dados históricos
+    df_historico_bufalos = pd.read_csv('bufalos.csv', parse_dates=['dt_nascimento'])
+    df_historico_ciclos = pd.read_csv('ciclos_lactacao.csv', parse_dates=['dt_parto', 'dt_secagem_real'])
     df_historico_ordenhas = pd.read_csv('dados_lactacao.csv')
-    df_historico_zootecnicos = pd.read_csv('dados_zootecnicos.csv')
+    
+    try:
+        df_historico_zootecnicos = pd.read_csv('dados_zootecnicos.csv', parse_dates=['dt_registro'])
+    except FileNotFoundError:
+        df_historico_zootecnicos = pd.DataFrame()
+    
     try:
         df_historico_sanitarios = pd.read_csv('dados_sanitarios.csv', parse_dates=['dt_aplicacao'])
     except FileNotFoundError:
         df_historico_sanitarios = pd.DataFrame()
+    
     try:
         df_historico_repro = pd.read_csv('dados_reproducao.csv', parse_dates=['dt_evento'])
     except FileNotFoundError:
         df_historico_repro = pd.DataFrame()
     
-    # Pré-cálculo das médias por propriedade
-    df_prod = df_historico_ordenhas.groupby('id_ciclo_lactacao')['qt_ordenha'].sum().reset_index()
-    df_ciclos_prod = pd.merge(df_historico_ciclos, df_prod, on='id_ciclo_lactacao')
-    df_completo = pd.merge(df_ciclos_prod, df_historico_bufalos, left_on='id_bufala', right_on='id_bufalo')
-    MEDIAS_PROPRIEDADE = df_completo.groupby('id_propriedade')['qt_ordenha'].sum().div(
-        df_completo.groupby('id_propriedade')['id_ciclo_lactacao'].nunique()
-    ).to_dict()
-    
-    print("✅ Modelo e todos os dados históricos carregados com sucesso!")
+    print("✅ Modelo individual e todos os dados históricos carregados com sucesso!")
+    print(f"📊 Features do modelo: {len(modelo_info.get('features', []))}")
 
 except FileNotFoundError as e:
     print(f"❌ ERRO CRÍTICO: Não foi possível carregar um arquivo essencial: {e}.")
-    print("A API iniciará com funcionalidade limitada ou pode falhar em endpoints de predição.")
+    print("A API iniciará com funcionalidade limitada.")
 
 except Exception as e:
     print(f"❌ ERRO INESPERADO DURANTE A INICIALIZAÇÃO: {e}")
 
+# --- Modelos de Dados (DTOs) ---
+class PredicaoIndividualInput(BaseModel):
+    id_femea: int = Field(..., description="ID único da búfala fêmea.")
 
-# --- Funções Auxiliares de Lógica de Negócio ---
-# Suas funções auxiliares originais, com pequenas melhorias de robustez.
-
-def calcular_producao_media_mae(id_bufala: int) -> float:
-    ciclos_bufala = df_historico_ciclos[df_historico_ciclos['id_bufala'] == id_bufala]['id_ciclo_lactacao']
-    if ciclos_bufala.empty:
-        return 2500.0  # Fallback
-    
-    producao_total = df_historico_ordenhas[df_historico_ordenhas['id_ciclo_lactacao'].isin(ciclos_bufala)]['qt_ordenha'].sum()
-    return producao_total / len(ciclos_bufala)
-
-def calcular_peso_medio_pai(id_pai: int) -> float:
-    if pd.isna(id_pai) or df_historico_zootecnicos.empty:
-        return 450.0
-    pesos = df_historico_zootecnicos[df_historico_zootecnicos['id_bufalo'] == id_pai]['peso']
-    return pesos.mean() if not pesos.empty else 450.0
-
-def preparar_features_predicao(id_macho: int, id_femea: int) -> (Dict[str, Any], pd.Series):
-    try:
-        femea = df_historico_bufalos[df_historico_bufalos['id_bufalo'] == id_femea].iloc[0]
-    except IndexError:
-        raise ValueError(f"Búfala com ID {id_femea} não encontrada.")
-
-    # Simulação simplificada de criação de features para manter o exemplo conciso
-    # A lógica complexa original pode ser mantida aqui
-    features = {
-        'id_propriedade': femea.get('id_propriedade', 0),
-        'producao_media_mae': calcular_producao_media_mae(id_femea),
-        'ganho_peso_medio_pai': calcular_peso_medio_pai(femea.get('id_pai')),
-        'idade_mae_anos': 5.0, # Valor simulado
-        'ordem_lactacao': 3, # Valor simulado
-        'estacao': 1, # Valor simulado
-        'intervalo_partos': 400, # Valor simulado
-        'potencial_genetico_avos': 1.0, # Valor simulado
-        'id_raca': femea.get('id_raca', 0),
-        'id_raca_avom': femea.get('id_raca', 0) # Simplificação
-    }
-    
-    # Retorna apenas as features que o modelo realmente utiliza
-    features_finais = {key: features.get(key) for key in features_utilizadas}
-    return features_finais, femea
-
-
-def _executar_predicao(id_macho: int, id_femea: int) -> dict:
-    """Função interna que centraliza toda a lógica de predição."""
-    if model is None:
-        raise HTTPException(status_code=503, detail="Modelo de predição não está disponível.")
-
-    try:
-        features, femea_info = preparar_features_predicao(id_macho, id_femea)
-        
-        df_input = pd.DataFrame([features])[features_utilizadas]
-        
-        previsao = model.predict(df_input)[0]
-        
-        media_propriedade = MEDIAS_PROPRIEDADE.get(femea_info['id_propriedade'], previsao)
-        percentual = (previsao / media_propriedade - 1) * 100 if media_propriedade > 0 else 0
-        
-        classificacao = "Na média da propriedade"
-        if percentual > 10: classificacao = "Potencial Alto"
-        elif percentual > 5: classificacao = "Potencial Acima da média"
-        elif percentual < -10: classificacao = "Potencial Baixo"
-        elif percentual < -5: classificacao = "Potencial Abaixo da média"
-
-        return {
-            "previsao_litros": round(previsao, 2),
-            "classificacao": classificacao,
-            "percentual_vs_media": round(percentual, 2),
-            "media_propriedade": round(media_propriedade, 2),
-            "id_propriedade": int(femea_info['id_propriedade'])
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        # Em produção, é ideal logar o erro `e` para um sistema de monitoramento
-        print(f"ERRO INTERNO: {e}")
-        raise HTTPException(status_code=500, detail="Ocorreu um erro interno ao processar a predição.")
-
-
-# --- Modelos de Dados (DTOs - Data Transfer Objects) ---
-class AcasalamentoInput(BaseModel):
+class SimulacaoAcasalamentoInput(BaseModel):
     id_macho: int = Field(..., description="ID único do búfalo macho.")
     id_femea: int = Field(..., description="ID único da búfala fêmea.")
 
-class PredicaoResponse(BaseModel):
-    producao_estimada_litros: float
-    classificacao_potencial: str
-    contexto_propriedade: dict
-    detalhes_pais: Optional[dict] = Field(None, description="Informações detalhadas sobre os pais, se solicitado.")
+class AnaliseGenealogicaInput(BaseModel):
+    id_bufalo: int = Field(..., description="ID único do búfalo para análise.")
 
+class PredicaoIndividualResponse(BaseModel):
+    id_femea: int
+    predicao_litros: float
+    classificacao_potencial: str
+    percentual_vs_media: float
+    producao_media_propriedade: float
+    id_propriedade: int
+    features_utilizadas: List[str]
+    data_predicao: str
+
+class SimulacaoAcasalamentoResponse(BaseModel):
+    macho_id: int
+    femea_id: int
+    consanguinidade_macho: float
+    consanguinidade_femea: float
+    parentesco_pais: float
+    consanguinidade_prole: float
+    risco_consanguinidade: str
+    recomendacao: str
+    predicao_producao_femea: Optional[PredicaoIndividualResponse] = None
+
+class AnaliseGenealogicaResponse(BaseModel):
+    id_bufalo: int
+    consanguinidade: float
+    ancestrais: Dict[str, List[int]]
+    descendentes: Dict[str, List[int]]
+    risco_genetico: str
+
+class MachosCompativeisResponse(BaseModel):
+    femea_id: int
+    machos_compatíveis: List[Dict[str, Any]]
+    total_encontrados: int
+    limite_consanguinidade: float
 
 # --- API Endpoints ---
 app = FastAPI(
-    title="Buffs IA API",
+    title="Buffs IA - Sistema de Predição Individual e Consanguinidade",
     version="1.0.0",
-    description="API para predição de potencial genético em búfalos leiteiros."
+    description="API para predição individual de produção de leite e análise de consanguinidade em búfalos."
 )
 
 @app.get("/", tags=["Status"])
 def read_root():
     """Endpoint principal que retorna o status da API e do modelo."""
     return {
-        "status": "API Operacional", 
+        "status": "API Operacional - Sistema de Predição Individual + Consanguinidade",
+        "versao": "1.0.0",
         "versao_modelo": modelo_info.get("versao", "N/A"),
-        "performance_modelo": modelo_info.get("model_performance", "N/A")
+        "tipo_modelo": modelo_info.get("tipo_modelo", "N/A"),
+        "performance_modelo": modelo_info.get("model_performance", {}),
+        "features_disponiveis": len(modelo_info.get("features", [])),
+        "descricao": modelo_info.get("descricao", "N/A")
     }
 
-# <<< ENDPOINT UNIFICADO E MELHORADO >>>
-@app.post("/prever-acasalamento", response_model=PredicaoResponse, tags=["Predição"])
-def prever_acasalamento(
-    data: AcasalamentoInput,
-    incluir_detalhes_pais: bool = Query(False, description="Se True, retorna informações detalhadas dos pais.")
+@app.post("/predicao-individual", response_model=PredicaoIndividualResponse, tags=["Predição Individual"])
+def predicao_producao_individual(data: PredicaoIndividualInput):
+    """
+    Prevê a produção de leite de uma fêmea em seu próximo ciclo de lactação.
+    """
+    if model is None:
+        raise HTTPException(status_code=503, detail="Modelo de predição individual não está disponível.")
+    
+    try:
+        resultado = fazer_predicao_producao_individual(
+            data.id_femea,
+            df_historico_bufalos,
+            df_historico_ciclos,
+            df_historico_ordenhas,
+            df_historico_zootecnicos,
+            df_historico_sanitarios,
+            df_historico_repro
+        )
+        
+        if resultado is None:
+            raise HTTPException(status_code=500, detail="Erro ao processar predição individual.")
+        
+        return PredicaoIndividualResponse(**resultado)
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        print(f"ERRO INTERNO: {e}")
+        raise HTTPException(status_code=500, detail="Ocorreu um erro interno ao processar a predição.")
+
+@app.post("/simular-acasalamento", response_model=SimulacaoAcasalamentoResponse, tags=["Simulação de Acasalamento"])
+def simular_acasalamento(
+    data: SimulacaoAcasalamentoInput,
+    incluir_predicao_femea: bool = Query(True, description="Se True, inclui predição de produção da fêmea.")
 ):
     """
-    Prevê o potencial de produção de leite da futura cria de um acasalamento.
+    Simula um acasalamento e calcula a consanguinidade da prole.
     """
-    resultado_predicao = _executar_predicao(data.id_macho, data.id_femea)
+    try:
+        # Cria árvore genealógica
+        arvore = criar_arvore_genealogica(df_historico_bufalos)
+        calculador = CalculadorConsanguinidade(arvore)
+        
+        # Simula acasalamento
+        simulacao = calculador.simular_acasalamento(data.id_macho, data.id_femea)
+        
+        # Predição da fêmea (opcional)
+        predicao_femea = None
+        if incluir_predicao_femea and model is not None:
+            predicao_femea = fazer_predicao_producao_individual(
+                data.id_femea,
+                df_historico_bufalos,
+                df_historico_ciclos,
+                df_historico_ordenhas,
+                df_historico_zootecnicos,
+                df_historico_sanitarios,
+                df_historico_repro
+            )
+            if predicao_femea:
+                predicao_femea = PredicaoIndividualResponse(**predicao_femea)
+        
+        # Monta resposta
+        response_data = simulacao.copy()
+        response_data['predicao_producao_femea'] = predicao_femea
+        
+        return SimulacaoAcasalamentoResponse(**response_data)
+        
+    except Exception as e:
+        print(f"ERRO NA SIMULAÇÃO: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao simular acasalamento.")
+
+@app.post("/analise-genealogica", response_model=AnaliseGenealogicaResponse, tags=["Análise Genealógica"])
+def analise_genealogica(data: AnaliseGenealogicaInput):
+    """
+    Analisa a genealogia de um búfalo e calcula seu coeficiente de consanguinidade.
+    """
+    try:
+        # Cria árvore genealógica
+        arvore = criar_arvore_genealogica(df_historico_bufalos)
+        calculador = CalculadorConsanguinidade(arvore)
+        
+        # Calcula consanguinidade
+        consanguinidade = calculador.calcular_coeficiente_wright(data.id_bufalo)
+        
+        # Obtém ancestrais e descendentes
+        ancestrais = arvore.obter_ancestrais(data.id_bufalo, max_geracoes=5)
+        descendentes = arvore.obter_descendentes(data.id_bufalo, max_geracoes=3)
+        
+        # Classifica risco genético
+        if consanguinidade > 0.0625:
+            risco_genetico = "Alto - Consanguinidade > 6.25%"
+        elif consanguinidade > 0.03125:
+            risco_genetico = "Médio - Consanguinidade 3.125-6.25%"
+        else:
+            risco_genetico = "Baixo - Consanguinidade < 3.125%"
+        
+        return AnaliseGenealogicaResponse(
+            id_bufalo=data.id_bufalo,
+            consanguinidade=round(consanguinidade * 100, 2),
+            ancestrais=ancestrais,
+            descendentes=descendentes,
+            risco_genetico=risco_genetico
+        )
+        
+    except Exception as e:
+        print(f"ERRO NA ANÁLISE GENEALÓGICA: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao analisar genealogia.")
+
+@app.get("/machos-compatíveis/{femea_id}", response_model=MachosCompativeisResponse, tags=["Recomendação"])
+def encontrar_machos_compatíveis(
+    femea_id: int,
+    max_consanguinidade: float = Query(6.25, description="Consanguinidade máxima aceitável em %")
+):
+    """
+    Encontra machos compatíveis para uma fêmea baseado na consanguinidade.
+    """
+    try:
+        # Cria árvore genealógica
+        arvore = criar_arvore_genealogica(df_historico_bufalos)
+        calculador = CalculadorConsanguinidade(arvore)
+        
+        # Converte percentual para decimal
+        max_consanguinidade_decimal = max_consanguinidade / 100
+        
+        # Encontra machos compatíveis
+        machos_compatíveis = calculador.encontrar_machos_compatíveis(
+            femea_id, 
+            max_consanguinidade_decimal
+        )
+        
+        return MachosCompativeisResponse(
+            femea_id=femea_id,
+            machos_compatíveis=machos_compatíveis,
+            total_encontrados=len(machos_compatíveis),
+            limite_consanguinidade=max_consanguinidade
+        )
+        
+    except Exception as e:
+        print(f"ERRO NA BUSCA DE MACHOS COMPATÍVEIS: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao buscar machos compatíveis.")
+
+@app.get("/informacoes-femea/{femea_id}", tags=["Informações"])
+def obter_informacoes_femea_endpoint(femea_id: int):
+    """
+    Obtém informações básicas de uma fêmea.
+    """
+    try:
+        info = obter_informacoes_femea(femea_id, df_historico_bufalos)
+        if info is None:
+            raise HTTPException(status_code=404, detail=f"Fêmea com ID {femea_id} não encontrada.")
+        
+        return info
+        
+    except Exception as e:
+        print(f"ERRO AO OBTER INFORMAÇÕES DA FÊMEA: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao obter informações da fêmea.")
+
+@app.get("/estatisticas-modelo", tags=["Modelo"])
+def estatisticas_modelo():
+    """
+    Retorna estatísticas detalhadas do modelo treinado.
+    """
+    if not modelo_info:
+        raise HTTPException(status_code=503, detail="Informações do modelo não disponíveis.")
     
-    response_data = {
-        "producao_estimada_litros": resultado_predicao["previsao_litros"],
-        "classificacao_potencial": resultado_predicao["classificacao"],
-        "contexto_propriedade": {
-            "id_propriedade": resultado_predicao["id_propriedade"],
-            "media_local_litros": resultado_predicao["media_propriedade"],
-            "diferenca_percentual": resultado_predicao["percentual_vs_media"]
-        }
+    return {
+        "informacoes_gerais": {
+            "versao": modelo_info.get("versao"),
+            "tipo_modelo": modelo_info.get("tipo_modelo"),
+            "descricao": modelo_info.get("descricao"),
+            "mlflow_run_id": modelo_info.get("mlflow_run_id")
+        },
+        "performance": modelo_info.get("model_performance", {}),
+        "features": {
+            "total": len(modelo_info.get("features", [])),
+            "lista": modelo_info.get("features", [])
+        },
+        "feature_importance": modelo_info.get("feature_importance", [])
     }
-    
-    if incluir_detalhes_pais:
-        try:
-            femea = df_historico_bufalos[df_historico_bufalos['id_bufalo'] == data.id_femea].iloc[0].to_dict()
-            macho = df_historico_bufalos[df_historico_bufalos['id_bufalo'] == data.id_macho].iloc[0].to_dict()
-            # Converte tipos numpy para tipos nativos do Python para serialização JSON
-            response_data["detalhes_pais"] = {
-                "femea": {k: v.item() if isinstance(v, np.generic) else v for k, v in femea.items()},
-                "macho": {k: v.item() if isinstance(v, np.generic) else v for k, v in macho.items()}
-            }
-        except IndexError:
-            response_data["detalhes_pais"] = {"erro": "Não foi possível encontrar detalhes para um dos pais."}
-            
-    return PredicaoResponse(**response_data)
 
 if __name__ == "__main__":
     import uvicorn
-    # Para rodar: uvicorn main:app --reload --port 5001
+    print("🚀 Iniciando Buffs IA - Sistema de Predição Individual + Consanguinidade")
+    print("📊 Versão: 1.0.0")
+    print("📊 Para visualizar MLflow: mlflow ui")
     uvicorn.run(app, host="0.0.0.0", port=5001)

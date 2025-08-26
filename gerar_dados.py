@@ -1,7 +1,7 @@
 # =================================================================
-# ARQUIVO: gerar_dados.py (VERSÃO 3.1 - COM DISTRIBUIÇÃO DE REBANHO)
-# OBJETIVO: Criar um dataset sintético completo, com perfis de
-#           propriedade e distribuição de rebanho bem definidos.
+# ARQUIVO: gerar_dados.py (VERSÃO 1.0.0)
+# OBJETIVO: Criar dataset sintético completo para o sistema de
+#           predição individual + consanguinidade.
 # =================================================================
 import pandas as pd
 import numpy as np
@@ -18,10 +18,11 @@ DATA_FINAL = date(2024, 1, 1)
 
 fake = Faker('pt_BR')
 
-print("Iniciando a geração de dados sintéticos COMPLETOS...")
+print("🚀 Iniciando geração de dados sintéticos para Buffs IA...")
+print("📊 Sistema: Predição Individual + Consanguinidade")
+print("📊 Versão: 1.0.0")
 
 # --- Perfil de cada Propriedade ---
-# <<< ALTERADO: Perfis definidos para baixo e alto nível >>>
 perfis_propriedade = {
     1: 0.85, # Baixo nível
     2: 0.95, # Baixo nível
@@ -29,8 +30,7 @@ perfis_propriedade = {
     4: 1.30  # De ponta
 }
 
-# --- (NOVO) Distribuição do Rebanho ---
-# Garante a contagem exata de búfalos por propriedade
+# --- Distribuição do Rebanho ---
 print("Definindo distribuição do rebanho...")
 total_bufalos_definidos = 20 + 40 + 110
 if NUM_BUFALOS < total_bufalos_definidos:
@@ -45,7 +45,6 @@ propriedade_assignments = (
 random.shuffle(propriedade_assignments)
 print(f"Distribuição final: Propriedade 1 ({propriedade_assignments.count(1)}), 2 ({propriedade_assignments.count(2)}), 3 ({propriedade_assignments.count(3)}), 4 ({propriedade_assignments.count(4)})")
 
-
 # --- 1. Geração da Tabela de Búfalos ---
 print("Gerando 'bufalos.csv'...")
 bufalos_data = []
@@ -55,7 +54,6 @@ for i in range(NUM_BUFALOS):
     sexo = random.choice(['M', 'F'])
     dt_nascimento = DATA_INICIAL + timedelta(days=random.randint(0, (DATA_FINAL - DATA_INICIAL).days))
     
-    # <<< ALTERADO: Atribuição de propriedade baseada na lista pré-definida >>>
     id_propriedade = propriedade_assignments[i]
     
     id_pai, id_mae = None, None
@@ -87,45 +85,65 @@ print("Gerando 'ciclos_lactacao.csv' e 'dados_lactacao.csv'...")
 ciclos_data, ordenhas_data = [], []
 ciclo_id_counter = 1
 femeas_adultas = df_bufalos[(df_bufalos['sexo'] == 'F') & (df_bufalos['dt_nascimento'] < date(2022, 1, 1))]
+
 for _, femea in femeas_adultas.iterrows():
     num_ciclos = random.randint(1, 3)
     dt_ultimo_parto = femea['dt_nascimento'] + timedelta(days=365 * 2)
+    
     for _ in range(num_ciclos):
-        if dt_ultimo_parto >= DATA_FINAL: continue
+        if dt_ultimo_parto >= DATA_FINAL: 
+            continue
+            
         dt_parto = dt_ultimo_parto + timedelta(days=random.randint(330, 400))
         padrao_dias = random.choice([270, 305])
-        ciclos_data.append({"id_ciclo_lactacao": ciclo_id_counter, "id_bufala": femea['id_bufalo'], "dt_parto": dt_parto})
         
-        # A produção é influenciada pela genética, que já foi influenciada pela propriedade
+        # Adiciona dt_secagem_real para o sistema
+        dt_secagem_real = dt_parto + timedelta(days=padrao_dias)
+        
+        ciclos_data.append({
+            "id_ciclo_lactacao": ciclo_id_counter, 
+            "id_bufala": femea['id_bufalo'], 
+            "dt_parto": dt_parto,
+            "dt_secagem_real": dt_secagem_real,
+            "padrao_dias": padrao_dias
+        })
+        
+        # Produção influenciada pela genética e propriedade
         producao_total_ciclo = 2500 * femea['potencial_genetico_leite'] + np.random.normal(0, 100)
         
+        # Curva de lactação mais realista
         dias_lactacao = np.arange(padrao_dias)
-        curva = dias_lactacao * np.exp(-dias_lactacao / 100.0)
+        pico_lactacao = padrao_dias // 3  # Pico no primeiro terço
+        
+        # Curva de lactação com pico e declínio
+        curva = np.exp(-((dias_lactacao - pico_lactacao) ** 2) / (2 * (pico_lactacao ** 2)))
         producao_diaria_normalizada = (curva / np.sum(curva)) * producao_total_ciclo if np.sum(curva) > 0 else np.zeros_like(curva)
         
         for dia, producao in enumerate(producao_diaria_normalizada):
-            ordenhas_data.append({
-                "id_lact": len(ordenhas_data) + 1, "id_ciclo_lactacao": ciclo_id_counter,
-                "qt_ordenha": max(0, producao + np.random.normal(0, 0.5)),
-                "dt_ordenha": dt_parto + timedelta(days=dia)
-            })
+            if producao > 0:
+                ordenhas_data.append({
+                    "id_lact": len(ordenhas_data) + 1, 
+                    "id_ciclo_lactacao": ciclo_id_counter,
+                    "qt_ordenha": max(0, round(producao + np.random.normal(0, producao * 0.1), 2)),
+                    "dt_ordenha": dt_parto + timedelta(days=dia)
+                })
+        
         ciclo_id_counter += 1
         dt_ultimo_parto = dt_parto
+
 df_ciclos = pd.DataFrame(ciclos_data)
 df_ordenhas = pd.DataFrame(ordenhas_data)
 
-
-# --- 3. Geração de Dados Zootécnicos e Sanitários ---
-print("Gerando 'dados_zootecnicos.csv' e 'dados_sanitarios.csv'...")
-zootecnicos_data, sanitarios_data = [], []
-doencas_comuns = ["Mastite", "Problema de Casco", "Pneumonia", "Carrapato"]
+# --- 3. Geração de Dados Zootécnicos ---
+print("Gerando 'dados_zootecnicos.csv'...")
+zootecnicos_data = []
 
 for _, bufalo in df_bufalos.iterrows():
     # Gera 2 a 5 registros zootécnicos ao longo da vida do animal
     for i in range(random.randint(2, 5)):
-        # Garante que o registro seja feito após o nascimento
         dias_de_vida = (DATA_FINAL - bufalo['dt_nascimento']).days
-        if dias_de_vida <= 30: continue
+        if dias_de_vida <= 30: 
+            continue
         
         dt_registro = bufalo['dt_nascimento'] + timedelta(days=random.randint(30, dias_de_vida))
         idade_anos = (dt_registro - bufalo['dt_nascimento']).days / 365.25
@@ -141,30 +159,95 @@ for _, bufalo in df_bufalos.iterrows():
             "dt_registro": dt_registro
         })
 
+df_zootecnicos = pd.DataFrame(zootecnicos_data)
+
+# --- 4. Geração de Dados Sanitários ---
+print("Gerando 'dados_sanitarios.csv'...")
+sanitarios_data = []
+doencas_comuns = ["Mastite", "Metrite", "Problema de Casco", "Laminite", "Pneumonia", "Carrapato", "Brucelose", "Leptospirose"]
+
+for _, bufalo in df_bufalos.iterrows():
     # Simula 0 a 3 eventos sanitários na vida do animal
     if random.random() > 0.5:
         for _ in range(random.randint(1, 3)):
             dias_de_vida = (DATA_FINAL - bufalo['dt_nascimento']).days
-            if dias_de_vida <= 180: continue
+            if dias_de_vida <= 180: 
+                continue
             
             dt_aplicacao = bufalo['dt_nascimento'] + timedelta(days=random.randint(180, dias_de_vida))
+            doenca = random.choice(doencas_comuns)
+            
             sanitarios_data.append({
                 "id_sanit": len(sanitarios_data) + 1,
                 "id_bufalo": bufalo['id_bufalo'],
-                "doenca": random.choice(doencas_comuns),
+                "doenca": doenca,
                 "medicacao": "Antibiótico" if random.random() > 0.3 else "Anti-inflamatório",
                 "dt_aplicacao": dt_aplicacao
             })
 
-df_zootecnicos = pd.DataFrame(zootecnicos_data)
 df_sanitarios = pd.DataFrame(sanitarios_data)
 
-# --- 4. Salvando todos os arquivos CSV ---
-print("Salvando arquivos CSV...")
+# --- 5. Geração de Dados Reprodutivos ---
+print("Gerando 'dados_reproducao.csv'...")
+repro_data = []
+
+for _, femea in femeas_adultas.iterrows():
+    # Para cada fêmea, gera eventos reprodutivos
+    num_eventos = random.randint(1, 4)
+    
+    for _ in range(num_eventos):
+        # Evento de reprodução após o nascimento
+        dias_de_vida = (DATA_FINAL - femea['dt_nascimento']).days
+        if dias_de_vida <= 365: 
+            continue
+        
+        dt_evento = femea['dt_nascimento'] + timedelta(days=random.randint(365, dias_de_vida))
+        
+        # Tipos de eventos reprodutivos
+        tipos_evento = ["Inseminação", "Monta Natural", "Diagnóstico de Gestação", "Parto"]
+        tipo = random.choice(tipos_evento)
+        
+        # Status baseado no tipo
+        if tipo in ["Inseminação", "Monta Natural"]:
+            status = random.choice(["Pendente", "Confirmada", "Falhou"])
+        elif tipo == "Diagnóstico de Gestação":
+            status = random.choice(["Positivo", "Negativo"])
+        else:  # Parto
+            status = "Confirmada"
+        
+        repro_data.append({
+            "id_repro": len(repro_data) + 1,
+            "id_receptora": femea['id_bufalo'],
+            "tipo_evento": tipo,
+            "status": status,
+            "dt_evento": dt_evento,
+            "observacoes": f"Evento {tipo.lower()} para fêmea {femea['id_bufalo']}"
+        })
+
+df_repro = pd.DataFrame(repro_data)
+
+# --- 6. Salvando todos os arquivos CSV ---
+print("💾 Salvando arquivos CSV...")
 df_bufalos.to_csv('bufalos.csv', index=False)
 df_ciclos.to_csv('ciclos_lactacao.csv', index=False)
 df_ordenhas.to_csv('dados_lactacao.csv', index=False)
 df_zootecnicos.to_csv('dados_zootecnicos.csv', index=False)
 df_sanitarios.to_csv('dados_sanitarios.csv', index=False)
+df_repro.to_csv('dados_reproducao.csv', index=False)
 
-print("\nArquivos CSV (com distribuição de rebanho definida) gerados com sucesso!")
+print("\n" + "="*60)
+print("✅ ARQUIVOS CSV GERADOS COM SUCESSO!")
+print("="*60)
+print(f"📊 Total de búfalos: {len(df_bufalos)}")
+print(f"🐄 Fêmeas adultas: {len(femeas_adultas)}")
+print(f"🔄 Ciclos de lactação: {len(df_ciclos)}")
+print(f"🥛 Registros de ordenha: {len(df_ordenhas)}")
+print(f"⚖️ Dados zootécnicos: {len(df_zootecnicos)}")
+print(f"🏥 Dados sanitários: {len(df_sanitarios)}")
+print(f"👶 Dados reprodutivos: {len(df_repro)}")
+print("="*60)
+print("\n🚀 PRÓXIMOS PASSOS:")
+print("1. Execute: python treinar_ia.py")
+print("2. Execute: python -m uvicorn app.main:app --reload --port 5001")
+print("3. Teste a API em: http://localhost:5001/docs")
+print("="*60)
