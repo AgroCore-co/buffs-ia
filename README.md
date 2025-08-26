@@ -67,46 +67,6 @@ A API estará disponível em `http://127.0.0.1:5001`.
 
 Você pode acessar a documentação interativa (gerada pelo Swagger UI) em `http://127.0.0.1:5001/docs`.
 
-### Principais Endpoints
-
-  - **`GET /`**
-
-      - **Descrição:** Verifica o status da API.
-      - **Resposta de Sucesso (200):**
-        ```json
-        {
-          "status": "BUFFS IA API está online"
-        }
-        ```
-
-  - **`POST /prever_leite`**
-
-      - **Descrição:** Recebe as características de um macho e uma fêmea e retorna a predição da produção de leite da prole.
-      - **Corpo da Requisição (JSON):**
-        ```json
-        {
-          "caracteristicas_macho": {
-            "id": 10,
-            "raca": 1
-          },
-          "caracteristicas_femea": {
-            "id": 15,
-            "raca": 1
-          }
-        }
-        ```
-      - **Resposta de Sucesso (200):**
-        ```json
-        {
-          "status": "sucesso",
-          "previsao_potencial": {
-            "producao_leite_litros_estimada": 2950.0,
-            "unidade": "litros/lactação",
-            "observacao": "Predição baseada em um modelo treinado."
-          }
-        }
-        ```
-
 ##  Próximos Passos (Roadmap)
 
 1.  **Extração de Dados:** Desenvolver os scripts para conectar ao banco de dados PostgreSQL e criar o dataset de treinamento inicial.
