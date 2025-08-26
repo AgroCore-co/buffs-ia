@@ -25,18 +25,35 @@ def carregar_dados():
     """Carrega todos os arquivos CSV necessários."""
     print("  - Carregando arquivos CSV...")
     df_bufalos = pd.read_csv('bufalos.csv', parse_dates=['dt_nascimento'])
-    df_ciclos = pd.read_csv('ciclos_lactacao.csv', parse_dates=['dt_parto'])
-    df_ordenhas = pd.read_csv('dados_lactacao.csv')
-    
+    # Tenta carregar datas adicionais, se existirem
     try:
-        df_zootecnicos = pd.read_csv('dados_zootecnicos.csv')
+        df_ciclos = pd.read_csv('ciclos_lactacao.csv', parse_dates=['dt_parto', 'dt_secagem_real'])
+    except ValueError:
+        # Caso a coluna dt_secagem_real não exista
+        df_ciclos = pd.read_csv('ciclos_lactacao.csv', parse_dates=['dt_parto'])
+    df_ordenhas = pd.read_csv('dados_lactacao.csv')
+
+    try:
+        df_zootecnicos = pd.read_csv('dados_zootecnicos.csv', parse_dates=['dt_registro'])
     except FileNotFoundError:
         print("    -> AVISO: dados_zootecnicos.csv não encontrado. Será ignorado.")
         df_zootecnicos = pd.DataFrame()
-        
-    return df_bufalos, df_ciclos, df_ordenhas, df_zootecnicos
 
-def processar_features(df_bufalos, df_ciclos, df_ordenhas, df_zootecnicos):
+    try:
+        df_sanitarios = pd.read_csv('dados_sanitarios.csv', parse_dates=['dt_aplicacao'])
+    except FileNotFoundError:
+        print("    -> AVISO: dados_sanitarios.csv não encontrado. Será ignorado.")
+        df_sanitarios = pd.DataFrame()
+
+    try:
+        df_repro = pd.read_csv('dados_reproducao.csv', parse_dates=['dt_evento'])
+    except FileNotFoundError:
+        print("    -> AVISO: dados_reproducao.csv não encontrado. Será ignorado.")
+        df_repro = pd.DataFrame()
+
+    return df_bufalos, df_ciclos, df_ordenhas, df_zootecnicos, df_sanitarios, df_repro
+
+def processar_features(df_bufalos, df_ciclos, df_ordenhas, df_zootecnicos, df_sanitarios, df_repro):
     """Executa a preparação de dados e a engenharia de features."""
     print("  - Processando e criando features...")
     
@@ -81,6 +98,99 @@ def processar_features(df_bufalos, df_ciclos, df_ordenhas, df_zootecnicos):
     
     df_base['potencial_genetico_avos'] = (df_base['potencial_genetico_leite_avom'].fillna(1.0) + df_base['potencial_genetico_leite_avop'].fillna(1.0)) / 2
     
+    # =====================
+    # Prioridade 1: Saúde
+    # =====================
+    # Determina fim do ciclo: usa dt_secagem_real, senão dt_parto + padrao_dias
+    if 'dt_secagem_real' not in df_ciclos.columns:
+        df_ciclos['dt_secagem_real'] = pd.NaT
+    if 'padrao_dias' not in df_ciclos.columns:
+        df_ciclos['padrao_dias'] = 305
+    df_ciclos['dt_fim_ciclo_calc'] = df_ciclos['dt_secagem_real']
+    mask_missing = df_ciclos['dt_fim_ciclo_calc'].isna()
+    df_ciclos.loc[mask_missing, 'dt_fim_ciclo_calc'] = df_ciclos.loc[mask_missing, 'dt_parto'] + pd.to_timedelta(df_ciclos.loc[mask_missing, 'padrao_dias'], unit='D')
+
+    # Mapas auxiliares por ciclo
+    ciclo_to_inicio = df_ciclos.set_index('id_ciclo_lactacao')['dt_parto']
+    ciclo_to_fim = df_ciclos.set_index('id_ciclo_lactacao')['dt_fim_ciclo_calc']
+    ciclo_to_id_bufala = df_ciclos.set_index('id_ciclo_lactacao')['id_bufala']
+
+    # contagem_tratamentos e flag_doenca_grave
+    df_base['contagem_tratamentos'] = 0
+    df_base['flag_doenca_grave'] = 0
+    if not df_sanitarios.empty:
+        # Prepara coluna de doença em minúsculas
+        df_sanitarios['doenca'] = df_sanitarios.get('doenca', '').astype(str).str.lower()
+        palavras_chave = ['mastite', 'metrite', 'podal', 'laminite', 'brucelose', 'leptospirose']
+        # Itera por ciclo para aplicar janela temporal
+        def calcula_saude_por_ciclo(row):
+            ciclo_id = row['id_ciclo_lactacao']
+            id_bufala = row['id_bufala']
+            inicio = ciclo_to_inicio.get(ciclo_id, pd.NaT)
+            fim = ciclo_to_fim.get(ciclo_id, pd.NaT)
+            if pd.isna(inicio) or pd.isna(fim):
+                return pd.Series({'contagem_tratamentos': 0, 'flag_doenca_grave': 0})
+            reg = df_sanitarios[(df_sanitarios['id_bufalo'] == id_bufala) & (df_sanitarios['dt_aplicacao'] >= inicio) & (df_sanitarios['dt_aplicacao'] <= fim)]
+            cont = len(reg)
+            has_grave = 1 if (reg['doenca'].apply(lambda x: any(k in x for k in palavras_chave)).any()) else 0
+            return pd.Series({'contagem_tratamentos': cont, 'flag_doenca_grave': has_grave})
+
+        df_saude = df_base.apply(calcula_saude_por_ciclo, axis=1)
+        df_base[['contagem_tratamentos', 'flag_doenca_grave']] = df_saude
+
+    # ecc_medio_ciclo
+    df_base['ecc_medio_ciclo'] = np.nan
+    if not df_zootecnicos.empty and 'condicao_corporal' in df_zootecnicos.columns:
+        def calcula_ecc(row):
+            ciclo_id = row['id_ciclo_lactacao']
+            id_bufala = row['id_bufala']
+            inicio = ciclo_to_inicio.get(ciclo_id, pd.NaT)
+            fim = ciclo_to_fim.get(ciclo_id, pd.NaT)
+            if pd.isna(inicio) or pd.isna(fim):
+                return np.nan
+            reg = df_zootecnicos[(df_zootecnicos['id_bufalo'] == id_bufala) & (df_zootecnicos['dt_registro'] >= inicio) & (df_zootecnicos['dt_registro'] <= fim)]
+            return reg['condicao_corporal'].mean() if not reg.empty else np.nan
+        df_base['ecc_medio_ciclo'] = df_base.apply(calcula_ecc, axis=1)
+    df_base['ecc_medio_ciclo'] = df_base['ecc_medio_ciclo'].fillna(3.0)
+
+    # ============================
+    # Prioridade 2: Reprodutivas
+    # ============================
+    # idade_primeiro_parto_dias
+    idade_primeiro_parto = (
+        df_ciclos.sort_values('dt_parto')
+        .groupby('id_bufala')['dt_parto']
+        .first()
+        .reset_index()
+        .merge(df_bufalos[['id_bufalo', 'dt_nascimento']], left_on='id_bufala', right_on='id_bufalo', how='left')
+    )
+    idade_primeiro_parto['idade_primeiro_parto_dias'] = (idade_primeiro_parto['dt_parto'] - idade_primeiro_parto['dt_nascimento']).dt.days
+    df_base = pd.merge(df_base, idade_primeiro_parto[['id_bufala', 'idade_primeiro_parto_dias']], on='id_bufala', how='left')
+
+    # dias_em_aberto: dias do parto até primeira concepção confirmada após o parto
+    df_base['dias_em_aberto'] = np.nan
+    if not df_repro.empty:
+        df_repro_conf = df_repro[df_repro.get('status', '').astype(str).str.lower() == 'confirmada']
+        # Para acelerar, indexa por fêmea
+        repro_por_femea = df_repro_conf.groupby('id_receptora')
+
+        def calcula_dias_em_aberto(row):
+            id_f = row['id_bufala']
+            dt_parto = row['dt_parto']
+            try:
+                eventos = repro_por_femea.get_group(id_f)
+            except KeyError:
+                return np.nan
+            futuros = eventos[eventos['dt_evento'] > dt_parto]
+            if futuros.empty:
+                return np.nan
+            concepcao = futuros['dt_evento'].min()
+            return (concepcao - dt_parto).days
+
+        df_base['dias_em_aberto'] = df_base.apply(calcula_dias_em_aberto, axis=1)
+        # Opcional: para o primeiro ciclo, pode ficar NaN
+        df_base.loc[df_base['ordem_lactacao'] == 1, 'dias_em_aberto'] = np.nan
+
     return df_base
 
 def treinar_avaliar_modelo(df_final):
@@ -90,7 +200,10 @@ def treinar_avaliar_modelo(df_final):
     features_selecionadas = [
         'id_propriedade', 'producao_media_mae', 'ganho_peso_medio_pai', 'idade_mae_anos',
         'ordem_lactacao', 'estacao', 'intervalo_partos', 'potencial_genetico_avos',
-        'id_raca', 'id_raca_avom'
+        'id_raca', 'id_raca_avom',
+        # Novas features
+        'contagem_tratamentos', 'flag_doenca_grave', 'ecc_medio_ciclo',
+        'idade_primeiro_parto_dias', 'dias_em_aberto'
     ]
     target = 'total_leite_ciclo'
     
@@ -98,6 +211,18 @@ def treinar_avaliar_modelo(df_final):
 
     if 'id_raca_avom' not in df_final.columns:
         df_final['id_raca_avom'] = 0
+
+    # Trata NaNs das novas features com defaults conservadores
+    fill_defaults = {
+        'contagem_tratamentos': 0,
+        'flag_doenca_grave': 0,
+        'ecc_medio_ciclo': 3.0,
+        'idade_primeiro_parto_dias': df_final.get('idade_mae_dias', pd.Series([1500])).median() if 'idade_mae_dias' in df_final.columns else 1500,
+        'dias_em_aberto': df_final.get('intervalo_partos', pd.Series([120])).median() if 'intervalo_partos' in df_final.columns else 120
+    }
+    for col, val in fill_defaults.items():
+        if col in df_final.columns:
+            df_final[col] = df_final[col].fillna(val)
 
     df_limpo = df_final.dropna(subset=[target] + features_selecionadas).copy()
     
@@ -171,8 +296,8 @@ if __name__ == "__main__":
     print("        🚀 INICIANDO PIPELINE DE TREINAMENTO 🚀")
     print("="*60)
     
-    df_bufalos, df_ciclos, df_ordenhas, df_zootecnicos = carregar_dados()
-    df_modelo = processar_features(df_bufalos, df_ciclos, df_ordenhas, df_zootecnicos)
+    df_bufalos, df_ciclos, df_ordenhas, df_zootecnicos, df_sanitarios, df_repro = carregar_dados()
+    df_modelo = processar_features(df_bufalos, df_ciclos, df_ordenhas, df_zootecnicos, df_sanitarios, df_repro)
     treinar_avaliar_modelo(df_modelo)
     
     print("\n✅ Pipeline concluído com sucesso!")

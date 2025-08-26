@@ -34,6 +34,14 @@ try:
     df_historico_ciclos = pd.read_csv('ciclos_lactacao.csv', parse_dates=['dt_parto'])
     df_historico_ordenhas = pd.read_csv('dados_lactacao.csv')
     df_historico_zootecnicos = pd.read_csv('dados_zootecnicos.csv')
+    try:
+        df_historico_sanitarios = pd.read_csv('dados_sanitarios.csv', parse_dates=['dt_aplicacao'])
+    except FileNotFoundError:
+        df_historico_sanitarios = pd.DataFrame()
+    try:
+        df_historico_repro = pd.read_csv('dados_reproducao.csv', parse_dates=['dt_evento'])
+    except FileNotFoundError:
+        df_historico_repro = pd.DataFrame()
     
     # Pré-cálculo das médias por propriedade
     df_prod = df_historico_ordenhas.groupby('id_ciclo_lactacao')['qt_ordenha'].sum().reset_index()

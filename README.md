@@ -1,77 +1,105 @@
-# BUFFS IA - Serviço de Predição Genética 🧬
+# BUFFS IA - Serviço de Predição 🧬
 
-Este repositório contém o serviço de Inteligência Artificial para a plataforma de manejo de búfalos **BUFFS**. A API, desenvolvida em Python com FastAPI, é responsável por abrigar os modelos de Machine Learning e fornecer endpoints para predição de potencial genético, simulação de acasalamentos e recomendação de cruzamentos.
+API em FastAPI para modelos de ML que estimam produção de leite por ciclo e simulam acasalamentos. Inclui geração de dados sintéticos, pipeline de treinamento com MLflow e endpoint de predição.
 
-Este serviço foi projetado para ser consumido pela API principal do BUFFS (desenvolvida em NestJS), atuando como o "cérebro" analítico do sistema.
+## Funcionalidades
+- **Predição por ciclo:** Regressão da produção total de leite por ciclo de lactação.
+- **Engenharia de features do rebanho:** Idade/ordem de lactação, sazonalidade, histórico próprio, genética de avós, saúde e reprodução.
+- **Simulação de acasalamentos:** Endpoint para estimar potencial com base na fêmea (com suporte a contexto da propriedade).
 
-##  Funcionalidades
-  - **Predição de Potencial Genético:** Estima características da prole (como produção de leite, saúde, etc.) com base nos dados dos pais.
-  - **Simulação de Acasalamentos:** Permite que o usuário teste virtualmente um cruzamento entre um macho e uma fêmea para visualizar o potencial da cria.
-  - **Recomendação de Cruzamentos (Roadmap):** Sugere os melhores acasalamentos para um conjunto de fêmeas, otimizando para objetivos específicos como maximização da produção ou minimização da consanguinidade.
+## Tecnologias
+- **API:** FastAPI + Uvicorn
+- **ML:** scikit-learn, MLflow (registro de modelos/artefatos)
+- **Dados:** pandas, numpy
 
-##  Tecnologias Utilizadas
+## Ambiente
+### Pré-requisitos
+- Python 3.10+
 
-  - **API:** [FastAPI](https://fastapi.tiangolo.com/) - Um moderno e performático framework web para Python.
-  - **Servidor:** [Uvicorn](https://www.uvicorn.org/) - Um servidor ASGI rápido, usado para rodar a aplicação FastAPI.
-  - **Machine Learning:** [Scikit-learn](https://scikit-learn.org/) - Para o treinamento e utilização dos modelos de predição.
-  - **Manipulação de Dados:** [Pandas](https://pandas.pydata.org/) - Essencial para a preparação dos datasets de treinamento.
-  - **Banco de Dados:** [PostgreSQL](https://www.postgresql.org/) - Conexão via `psycopg2` para extrair os dados de treinamento.
-  - **Validação de Dados:** [Pydantic](https://www.google.com/search?q=https://docs.pydantic.dev/) - Utilizado pelo FastAPI para garantir a integridade dos dados de entrada e saída da API.
-
-##  Configuração do Ambiente
-
-Siga os passos abaixo para configurar o ambiente de desenvolvimento local.
-
-### 1\. Pré-requisitos
-
-  - Python 3.9 ou superior
-  - `pip` (gerenciador de pacotes do Python)
-
-### 2\. Crie um Ambiente Virtual
-
-É uma boa prática isolar as dependências do projeto. Na raiz do projeto, crie e ative um ambiente virtual:
-
+### Virtualenv e dependências
 ```bash
-# Criar o ambiente virtual
-python3 -m venv .venv
+python -m venv .venv
+# Windows
+.\.venv\Scripts\activate
+# Linux/macOS
+# source .venv/bin/activate
 
-# Ativar o ambiente virtual (Linux/macOS)
-source .venv/bin/activate
-
-# Ativar o ambiente virtual (Windows)
-# .\.venv\Scripts\activate
-```
-
-### 3\. Instale as Dependências
-
-Com o ambiente virtual ativo, instale todas as bibliotecas necessárias a partir do arquivo `requirements.txt`:
-
-```bash
 pip install -r requirements.txt
 ```
 
-##  Executando a Aplicação
+## Dados
+Você pode usar dados próprios (CSV) ou gerar dados sintéticos.
 
-Com o ambiente configurado e as dependências instaladas, inicie o servidor Uvicorn:
+- Arquivos esperados pelo pipeline de treino:
+  - `bufalos.csv`
+  - `ciclos_lactacao.csv`
+  - `dados_lactacao.csv`
+  - `dados_zootecnicos.csv` (opcional, para ECC/peso)
+  - `dados_sanitarios.csv` (opcional, saúde)
+  - `dados_reproducao.csv` (opcional, reprodução)
 
+### Gerar dados sintéticos
+```bash
+python gerar_dados.py
+```
+Gera: `bufalos.csv`, `ciclos_lactacao.csv`, `dados_lactacao.csv`, `dados_zootecnicos.csv`, `dados_sanitarios.csv`.
+
+## Treinamento
+Execute o pipeline completo com logging no MLflow:
+```bash
+python treinar.py
+```
+Saídas:
+- `modelo_leite.joblib` (modelo RandomForestRegressor)
+- `modelo_info.json` (features, métricas, importâncias)
+- Registro no MLflow Model Registry (`preditor-leite-buffs`)
+
+Para visualizar o MLflow UI:
+```bash
+mlflow ui
+```
+
+### Features criadas (principal)
+- Base: `idade_mae_anos`, `ordem_lactacao`, `estacao`, `intervalo_partos`, `producao_media_mae`, `ganho_peso_medio_pai`, `potencial_genetico_avos`, `id_raca`, `id_raca_avom`.
+- Saúde (usa janela [dt_parto, dt_secagem_real ou dt_parto+padrao_dias]):
+  - `contagem_tratamentos` (COUNT em `dados_sanitarios`)
+  - `flag_doenca_grave` (palavras-chave: mastite, metrite, podal, ...)
+  - `ecc_medio_ciclo` (AVG `condicao_corporal` em `dados_zootecnicos`)
+- Reprodução:
+  - `idade_primeiro_parto_dias`
+  - `dias_em_aberto` (até primeira concepção confirmada após o parto; requer `dados_reproducao.csv`)
+
+Observação: quando arquivos opcionais estão ausentes, o pipeline aplica defaults seguros (ex.: ECC=3.0, contagem=0) para evitar NaNs.
+
+## API
+Inicie a API:
 ```bash
 uvicorn app.main:app --reload --port 5001
 ```
+Swagger: `http://127.0.0.1:5001/docs`
 
-  - `--reload`: O servidor reiniciará automaticamente após qualquer alteração nos arquivos. Ideal para desenvolvimento.
-  - `--port 5001`: Define a porta em que a API irá rodar.
+### Endpoint principal
+- `POST /prever-acasalamento`
 
-A API estará disponível em `http://127.0.0.1:5001`.
+Exemplo:
+```bash
+curl -X POST "http://127.0.0.1:5001/prever-acasalamento?incluir_detalhes_pais=true" \
+  -H "Content-Type: application/json" \
+  -d '{"id_macho": 1, "id_femea": 1}'
+```
 
-##  Endpoints da API
+Resposta (campos principais):
+- `producao_estimada_litros`: previsão do modelo
+- `classificacao_potencial`: comparação com média da propriedade
+- `contexto_propriedade`: id, média local e diferença percentual
+- `detalhes_pais` (opcional): info bruta dos pais se solicitado
 
-Você pode acessar a documentação interativa (gerada pelo Swagger UI) em `http://127.0.0.1:5001/docs`.
+Notas:
+- A predição usa as features definidas em `modelo_info.json`. Hoje, o conjunto de features é centrado na fêmea e contexto do rebanho; o `id_macho` é retornado apenas como metadado quando solicitado.
+- As médias por propriedade são calculadas dos CSVs carregados no startup da API.
 
-##  Próximos Passos (Roadmap)
-
-1.  **Extração de Dados:** Desenvolver os scripts para conectar ao banco de dados PostgreSQL e criar o dataset de treinamento inicial.
-2.  **Treinamento do Modelo v1:** Treinar o primeiro modelo de regressão (`RandomForest` ou `XGBoost`) para prever a produção de leite.
-3.  **Integração do Modelo:** Substituir a lógica simulada no endpoint `/prever_leite` pela chamada ao modelo treinado.
-4.  **Expansão:** Criar e treinar novos modelos para prever outras características (saúde, resistência, etc.) e desenvolver o endpoint de recomendação de acasalamentos.
-
------
+## Estrutura
+- `gerar_dados.py`: gera CSVs sintéticos
+- `treinar.py`: pipeline de treinamento + MLflow
+- `app/main.py`: API FastAPI e endpoint `/prever-acasalamento`
+- `app/models/prediction.py`: utilidades de predição (legado/suporte)
