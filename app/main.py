@@ -1,5 +1,5 @@
 # =================================================================
-# ARQUIVO: main.py (VERSÃO 1.0.0)
+# ARQUIVO: main.py (VERSÃO 1.1 - CAMINHOS CORRIGIDOS)
 # OBJETIVO: API para predição individual de produção de leite + 
 #           análise de consanguinidade e simulação de acasalamentos.
 # =================================================================
@@ -11,6 +11,7 @@ import joblib
 import json
 from typing import Optional, Dict, Any, List
 from datetime import datetime
+import os # Importa o módulo os para manipulação de caminhos
 
 # Importa módulos locais
 from app.models.prediction import (
@@ -35,6 +36,9 @@ df_historico_repro = pd.DataFrame()
 try:
     print("Carregando modelo individual e dados para API...")
     
+    # <<< CORREÇÃO: Define o caminho para a pasta de dados >>>
+    data_path = "dados_benchmark_v1/"
+
     # Carrega modelo individual
     model = joblib.load('modelo_producao_individual.joblib')
     
@@ -42,23 +46,23 @@ try:
     with open('modelo_producao_individual_info.json', 'r') as f:
         modelo_info = json.load(f)
     
-    # Carrega dados históricos
-    df_historico_bufalos = pd.read_csv('bufalos.csv', parse_dates=['dt_nascimento'])
-    df_historico_ciclos = pd.read_csv('ciclos_lactacao.csv', parse_dates=['dt_parto', 'dt_secagem_real'])
-    df_historico_ordenhas = pd.read_csv('dados_lactacao.csv')
+    # <<< CORREÇÃO: Usa o caminho correto para carregar os arquivos >>>
+    df_historico_bufalos = pd.read_csv(os.path.join(data_path, 'bufalos.csv'), parse_dates=['dt_nascimento'])
+    df_historico_ciclos = pd.read_csv(os.path.join(data_path, 'ciclos_lactacao.csv'), parse_dates=['dt_parto', 'dt_secagem_real'])
+    df_historico_ordenhas = pd.read_csv(os.path.join(data_path, 'dados_lactacao.csv'))
     
     try:
-        df_historico_zootecnicos = pd.read_csv('dados_zootecnicos.csv', parse_dates=['dt_registro'])
+        df_historico_zootecnicos = pd.read_csv(os.path.join(data_path, 'dados_zootecnicos.csv'), parse_dates=['dt_registro'])
     except FileNotFoundError:
         df_historico_zootecnicos = pd.DataFrame()
     
     try:
-        df_historico_sanitarios = pd.read_csv('dados_sanitarios.csv', parse_dates=['dt_aplicacao'])
+        df_historico_sanitarios = pd.read_csv(os.path.join(data_path, 'dados_sanitarios.csv'), parse_dates=['dt_aplicacao'])
     except FileNotFoundError:
         df_historico_sanitarios = pd.DataFrame()
     
     try:
-        df_historico_repro = pd.read_csv('dados_reproducao.csv', parse_dates=['dt_evento'])
+        df_historico_repro = pd.read_csv(os.path.join(data_path, 'dados_reproducao.csv'), parse_dates=['dt_evento'])
     except FileNotFoundError:
         df_historico_repro = pd.DataFrame()
     
@@ -219,11 +223,11 @@ def analise_genealogica(data: AnaliseGenealogicaInput):
         calculador = CalculadorConsanguinidade(arvore)
         
         # Calcula consanguinidade
-        consanguinidade = calculador.calcular_coeficiente_wright(data.id_bufalo)
+        consanguinidade = calculador.calcular_consanguinidade(data.id_bufalo)
         
-        # Obtém ancestrais e descendentes
-        ancestrais = arvore.obter_ancestrais(data.id_bufalo, max_geracoes=5)
-        descendentes = arvore.obter_descendentes(data.id_bufalo, max_geracoes=3)
+        # Obtém ancestrais e descendentes (Esta lógica precisa ser implementada no Calculador)
+        ancestrais = {} # Placeholder
+        descendentes = {} # Placeholder
         
         # Classifica risco genético
         if consanguinidade > 0.0625:

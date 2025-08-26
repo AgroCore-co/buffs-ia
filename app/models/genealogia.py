@@ -1,349 +1,104 @@
 # =================================================================
-# ARQUIVO: genealogia.py (VERSÃO 1.0.0)
-# OBJETIVO: Módulo para análise genealógica e cálculo de consanguinidade
-#           em búfalos usando o coeficiente de Wright.
+# ARQUIVO: genealogia.py (VERSÃO 1.1 - WRIGHT CORRIGIDO E ROBUSTO)
+# OBJETIVO: Implementação robusta e correta para cálculo de
+#           consanguinidade e parentesco usando o Coeficiente de Wright.
 # =================================================================
 import pandas as pd
-from collections import defaultdict, deque
-from typing import Dict, List, Set, Tuple, Optional, Any
 import numpy as np
-
-class ArvoreGenealogica:
-    """
-    Classe para construção e análise de árvores genealógicas de búfalos.
-    """
-    
-    def __init__(self, df_bufalos: pd.DataFrame):
-        """
-        Inicializa a árvore genealógica a partir dos dados dos búfalos.
-        
-        Args:
-            df_bufalos: DataFrame com colunas id_bufalo, id_pai, id_mae
-        """
-        self.df_bufalos = df_bufalos
-        self.arvore = {}
-        self._construir_arvore()
-    
-    def _construir_arvore(self):
-        """Constrói a representação da árvore genealógica."""
-        for _, bufalo in self.df_bufalos.iterrows():
-            id_bufalo = bufalo['id_bufalo']
-            id_pai = bufalo.get('id_pai')
-            id_mae = bufalo.get('id_mae')
-            
-            self.arvore[id_bufalo] = {
-                'pai': id_pai,
-                'mae': id_mae,
-                'filhos': []
-            }
-            
-            # Adiciona como filho dos pais
-            if id_pai and pd.notna(id_pai):
-                if id_pai in self.arvore:
-                    self.arvore[id_pai]['filhos'].append(id_bufalo)
-                else:
-                    self.arvore[id_pai] = {'pai': None, 'mae': None, 'filhos': [id_bufalo]}
-            
-            if id_mae and pd.notna(id_mae):
-                if id_mae in self.arvore:
-                    self.arvore[id_mae]['filhos'].append(id_bufalo)
-                else:
-                    self.arvore[id_mae] = {'pai': None, 'mae': None, 'filhos': [id_bufalo]}
-    
-    def obter_ancestrais(self, id_bufalo: int, max_geracoes: int = 5) -> Dict[str, List[int]]:
-        """
-        Obtém ancestrais de um búfalo até uma geração específica.
-        
-        Args:
-            id_bufalo: ID do búfalo
-            max_geracoes: Número máximo de gerações para buscar
-            
-        Returns:
-            Dicionário com ancestrais por geração
-        """
-        if id_bufalo not in self.arvore:
-            return {}
-        
-        ancestrais = defaultdict(list)
-        visitados = set()
-        fila = deque([(id_bufalo, 0)])
-        
-        while fila:
-            bufalo_atual, geracao = fila.popleft()
-            
-            if geracao >= max_geracoes or bufalo_atual in visitados:
-                continue
-            
-            visitados.add(bufalo_atual)
-            bufalo_info = self.arvore.get(bufalo_atual, {})
-            
-            pai = bufalo_info.get('pai')
-            mae = bufalo_info.get('mae')
-            
-            if pai and pd.notna(pai):
-                ancestrais[f'geracao_{geracao + 1}_pai'].append(pai)
-                fila.append((pai, geracao + 1))
-            
-            if mae and pd.notna(mae):
-                ancestrais[f'geracao_{geracao + 1}_mae'].append(mae)
-                fila.append((mae, geracao + 1))
-        
-        return dict(ancestrais)
-    
-    def obter_descendentes(self, id_bufalo: int, max_geracoes: int = 3) -> Dict[str, List[int]]:
-        """
-        Obtém descendentes de um búfalo até uma geração específica.
-        
-        Args:
-            id_bufalo: ID do búfalo
-            max_geracoes: Número máximo de gerações para buscar
-            
-        Returns:
-            Dicionário com descendentes por geração
-        """
-        if id_bufalo not in self.arvore:
-            return {}
-        
-        descendentes = defaultdict(list)
-        visitados = set()
-        fila = deque([(id_bufalo, 0)])
-        
-        while fila:
-            bufalo_atual, geracao = fila.popleft()
-            
-            if geracao >= max_geracoes or bufalo_atual in visitados:
-                continue
-            
-            visitados.add(bufalo_atual)
-            bufalo_info = self.arvore.get(bufalo_atual, {})
-            
-            for filho in bufalo_info.get('filhos', []):
-                descendentes[f'geracao_{geracao + 1}_filhos'].append(filho)
-                fila.append((filho, geracao + 1))
-        
-        return dict(descendentes)
-    
-    def encontrar_ancestrais_comuns(self, id_bufalo1: int, id_bufalo2: int) -> Set[int]:
-        """
-        Encontra ancestrais comuns entre dois búfalos.
-        
-        Args:
-            id_bufalo1: ID do primeiro búfalo
-            id_bufalo2: ID do segundo búfalo
-            
-        Returns:
-            Conjunto de IDs dos ancestrais comuns
-        """
-        ancestrais1 = set()
-        ancestrais2 = set()
-        
-        # Coleta ancestrais do primeiro búfalo
-        fila1 = deque([(id_bufalo1, 0)])
-        while fila1:
-            bufalo, geracao = fila1.popleft()
-            if geracao > 10:  # Limite de segurança
-                continue
-            
-            bufalo_info = self.arvore.get(bufalo, {})
-            pai = bufalo_info.get('pai')
-            mae = bufalo_info.get('mae')
-            
-            if pai and pd.notna(pai):
-                ancestrais1.add(pai)
-                fila1.append((pai, geracao + 1))
-            
-            if mae and pd.notna(mae):
-                ancestrais1.add(mae)
-                fila1.append((mae, geracao + 1))
-        
-        # Coleta ancestrais do segundo búfalo
-        fila2 = deque([(id_bufalo2, 0)])
-        while fila2:
-            bufalo, geracao = fila2.popleft()
-            if geracao > 10:  # Limite de segurança
-                continue
-            
-            bufalo_info = self.arvore.get(bufalo, {})
-            pai = bufalo_info.get('pai')
-            mae = bufalo_info.get('mae')
-            
-            if pai and pd.notna(pai):
-                ancestrais2.add(pai)
-                fila2.append((pai, geracao + 1))
-            
-            if mae and pd.notna(mae):
-                ancestrais2.add(mae)
-                fila2.append((mae, geracao + 1))
-        
-        return ancestrais1.intersection(ancestrais2)
+from typing import Dict, List, Tuple, Any
 
 class CalculadorConsanguinidade:
     """
-    Classe para cálculo de coeficientes de consanguinidade e parentesco.
+    Calcula o parentesco e a consanguinidade usando o método recursivo
+    de Wright com cache (memoização) para garantir performance e evitar erros.
     """
-    
-    def __init__(self, arvore: ArvoreGenealogica):
-        """
-        Inicializa o calculador com uma árvore genealógica.
+    def __init__(self, df_bufalos: pd.DataFrame):
+        self._df_bufalos = df_bufalos.copy()
         
-        Args:
-            arvore: Instância de ArvoreGenealogica
-        """
-        self.arvore = arvore
-        self.cache_consanguinidade = {}
-        self.cache_parentesco = {}
-    
-    def calcular_coeficiente_wright(self, id_bufalo: int) -> float:
-        """
-        Calcula o coeficiente de consanguinidade de Wright para um búfalo.
+        # Caches para armazenar resultados já calculados e evitar reprocessamento
+        self._consanguinidade_cache: Dict[int, float] = {}
+        self._parentesco_cache: Dict[Tuple[int, int], float] = {}
         
-        Args:
-            id_bufalo: ID do búfalo
-            
-        Returns:
-            Coeficiente de consanguinidade (0.0 a 1.0)
-        """
-        if id_bufalo in self.cache_consanguinidade:
-            return self.cache_consanguinidade[id_bufalo]
+        # Lida com DataFrame vazio de forma segura para evitar erros na inicialização
+        if self._df_bufalos.empty:
+            self._pedigree = {}
+            return
+
+        # Prepara o pedigree para os cálculos
+        self._df_bufalos['id_pai'] = self._df_bufalos['id_pai'].fillna(0).astype(int)
+        self._df_bufalos['id_mae'] = self._df_bufalos['id_mae'].fillna(0).astype(int)
+        self._pedigree = self._df_bufalos.set_index('id_bufalo')[['id_pai', 'id_mae']].to_dict('index')
+
+    def _get_pais(self, animal_id: int) -> Tuple[int, int]:
+        """Retorna (pai, mae) de um animal. Retorna (0, 0) se não encontrado."""
+        if animal_id == 0:
+            return 0, 0
+        info = self._pedigree.get(animal_id)
+        return (info['id_pai'], info['id_mae']) if info else (0, 0)
+
+    def calcular_parentesco(self, id_a: int, id_b: int) -> float:
+        """Calcula o coeficiente de parentesco (coancestria) entre dois animais A e B."""
+        # Ordena para garantir consistência no cache
+        if id_a > id_b:
+            id_a, id_b = id_b, id_a
         
-        if id_bufalo not in self.arvore.arvore:
+        cache_key = (id_a, id_b)
+        if cache_key in self._parentesco_cache:
+            return self._parentesco_cache[cache_key]
+
+        # Caso base: parentesco de um animal com ele mesmo
+        if id_a == id_b:
+            resultado = 0.5 * (1 + self.calcular_consanguinidade(id_a))
+            self._parentesco_cache[cache_key] = resultado
+            return resultado
+
+        # Caso base: se um dos animais é fundador (sem pais), o parentesco é zero
+        pai_b, mae_b = self._get_pais(id_b)
+        if pai_b == 0 and mae_b == 0:
+            self._parentesco_cache[cache_key] = 0.0
             return 0.0
         
-        bufalo_info = self.arvore.arvore[id_bufalo]
-        pai = bufalo_info.get('pai')
-        mae = bufalo_info.get('mae')
-        
-        # Se não tem pais, não há consanguinidade
-        if not pai or not mae or pd.isna(pai) or pd.isna(mae):
-            self.cache_consanguinidade[id_bufalo] = 0.0
+        # Fórmula recursiva de Wright: o parentesco de A e B é a média do parentesco de A com os pais de B
+        resultado = 0.5 * (self.calcular_parentesco(id_a, pai_b) + self.calcular_parentesco(id_a, mae_b))
+        self._parentesco_cache[cache_key] = resultado
+        return resultado
+
+    def calcular_consanguinidade(self, animal_id: int) -> float:
+        """Calcula o coeficiente de consanguinidade de um animal."""
+        if animal_id in self._consanguinidade_cache:
+            return self._consanguinidade_cache[animal_id]
+
+        pai_id, mae_id = self._get_pais(animal_id)
+
+        if pai_id == 0 or mae_id == 0:
+            self._consanguinidade_cache[animal_id] = 0.0
             return 0.0
+
+        # A consanguinidade de um indivíduo é o parentesco (coancestria) entre seus pais
+        resultado = self.calcular_parentesco(pai_id, mae_id)
+        self._consanguinidade_cache[animal_id] = resultado
+        return resultado
+
+    def simular_acasalamento(self, id_macho: int, id_femea: int) -> Dict:
+        """Simula um acasalamento e retorna um dicionário com os resultados."""
+        if not self._pedigree:
+            raise ValueError("Dados de genealogia não foram carregados. Não é possível simular.")
+
+        consanguinidade_macho = self.calcular_consanguinidade(id_macho)
+        consanguinidade_femea = self.calcular_consanguinidade(id_femea)
+        parentesco_pais = self.calcular_parentesco(id_macho, id_femea)
         
-        # Calcula consanguinidade dos pais
-        consanguinidade_pai = self.calcular_coeficiente_wright(pai)
-        consanguinidade_mae = self.calcular_coeficiente_wright(mae)
-        
-        # Calcula coeficiente de parentesco entre os pais
-        parentesco_pais = self.calcular_coeficiente_parentesco(pai, mae)
-        
-        # Fórmula de Wright: F = (1 + F_pai + F_mae) * r_pai_mae / 2
-        consanguinidade = (1 + consanguinidade_pai + consanguinidade_mae) * parentesco_pais / 2
-        
-        self.cache_consanguinidade[id_bufalo] = consanguinidade
-        return consanguinidade
-    
-    def calcular_coeficiente_parentesco(self, id_bufalo1: int, id_bufalo2: int) -> float:
-        """
-        Calcula o coeficiente de parentesco entre dois búfalos.
-        
-        Args:
-            id_bufalo1: ID do primeiro búfalo
-            id_bufalo2: ID do segundo búfalo
-            
-        Returns:
-            Coeficiente de parentesco (0.0 a 1.0)
-        """
-        cache_key = tuple(sorted([id_bufalo1, id_bufalo2]))
-        if cache_key in self.cache_parentesco:
-            return self.cache_parentesco[cache_key]
-        
-        if id_bufalo1 == id_bufalo2:
-            return 1.0
-        
-        # Encontra ancestrais comuns
-        ancestrais_comuns = self.arvore.encontrar_ancestrais_comuns(id_bufalo1, id_bufalo2)
-        
-        if not ancestrais_comuns:
-            self.cache_parentesco[cache_key] = 0.0
-            return 0.0
-        
-        # Calcula parentesco usando o método dos caminhos
-        parentesco_total = 0.0
-        
-        for ancestral in ancestrais_comuns:
-            caminhos1 = self._encontrar_caminhos_para_ancestral(id_bufalo1, ancestral)
-            caminhos2 = self._encontrar_caminhos_para_ancestral(id_bufalo2, ancestral)
-            
-            for caminho1 in caminhos1:
-                for caminho2 in caminhos2:
-                    # Calcula contribuição deste ancestral
-                    contribuicao = (0.5) ** (len(caminho1) + len(caminho2) - 2)
-                    
-                    # Aplica consanguinidade do ancestral
-                    consanguinidade_ancestral = self.calcular_coeficiente_wright(ancestral)
-                    contribuicao *= (1 + consanguinidade_ancestral)
-                    
-                    parentesco_total += contribuicao
-        
-        self.cache_parentesco[cache_key] = parentesco_total
-        return parentesco_total
-    
-    def _encontrar_caminhos_para_ancestral(self, id_bufalo: int, id_ancestral: int) -> List[List[int]]:
-        """
-        Encontra todos os caminhos de um búfalo até um ancestral.
-        
-        Args:
-            id_bufalo: ID do búfalo
-            id_ancestral: ID do ancestral
-            
-        Returns:
-            Lista de caminhos (cada caminho é uma lista de IDs)
-        """
-        if id_bufalo == id_ancestral:
-            return [[]]
-        
-        if id_bufalo not in self.arvore.arvore:
-            return []
-        
-        caminhos = []
-        bufalo_info = self.arvore.arvore[id_bufalo]
-        pai = bufalo_info.get('pai')
-        mae = bufalo_info.get('mae')
-        
-        # Busca pelo pai
-        if pai and pd.notna(pai):
-            caminhos_pai = self._encontrar_caminhos_para_ancestral(pai, id_ancestral)
-            for caminho in caminhos_pai:
-                caminhos.append([pai] + caminho)
-        
-        # Busca pela mãe
-        if mae and pd.notna(mae):
-            caminhos_mae = self._encontrar_caminhos_para_ancestral(mae, id_ancestral)
-            for caminho in caminhos_mae:
-                caminhos.append([mae] + caminho)
-        
-        return caminhos
-    
-    def simular_acasalamento(self, id_macho: int, id_femea: int) -> Dict[str, Any]:
-        """
-        Simula um acasalamento e calcula a consanguinidade da prole.
-        
-        Args:
-            id_macho: ID do macho
-            id_femea: ID da fêmea
-            
-        Returns:
-            Dicionário com resultados da simulação
-        """
-        # Calcula consanguinidade dos pais
-        consanguinidade_macho = self.calcular_coeficiente_wright(id_macho)
-        consanguinidade_femea = self.calcular_coeficiente_wright(id_femea)
-        
-        # Calcula parentesco entre os pais
-        parentesco_pais = self.calcular_coeficiente_parentesco(id_macho, id_femea)
-        
-        # Calcula consanguinidade da prole
-        consanguinidade_prole = parentesco_pais / 2
-        
-        # Classifica risco
-        if consanguinidade_prole > 0.0625:  # > 6.25%
+        # A consanguinidade da prole é o parentesco dos pais
+        consanguinidade_prole = parentesco_pais
+
+        risco = "Baixo"
+        recomendacao = "Acasalamento seguro - baixo risco genético."
+        if consanguinidade_prole > 0.125: # Acima de primos-irmãos (ex: pai-filha = 0.25)
+            risco = "Extremo"
+            recomendacao = "NÃO RECOMENDADO. Risco genético extremo (ex: pai-filha, irmãos completos)."
+        elif consanguinidade_prole > 0.0625: # Acima de meio-irmãos
             risco = "Alto"
-            recomendacao = "Evitar acasalamento - risco genético elevado"
-        elif consanguinidade_prole > 0.03125:  # > 3.125%
-            risco = "Médio"
-            recomendacao = "Acasalamento com cautela - monitorar prole"
-        else:
-            risco = "Baixo"
-            recomendacao = "Acasalamento seguro - baixo risco genético"
+            recomendacao = "Atenção: Risco genético alto. Evitar se possível."
         
         return {
             "macho_id": id_macho,
@@ -355,56 +110,9 @@ class CalculadorConsanguinidade:
             "risco_consanguinidade": risco,
             "recomendacao": recomendacao
         }
-    
-    def encontrar_machos_compatíveis(
-        self, 
-        id_femea: int, 
-        max_consanguinidade: float = 0.0625
-    ) -> List[Dict[str, Any]]:
-        """
-        Encontra machos compatíveis para uma fêmea baseado na consanguinidade.
-        
-        Args:
-            id_femea: ID da fêmea
-            max_consanguinidade: Consanguinidade máxima aceitável (padrão: 6.25%)
-            
-        Returns:
-            Lista de machos compatíveis ordenados por compatibilidade
-        """
-        # Filtra apenas machos
-        machos = self.arvore.df_bufalos[self.arvore.df_bufalos['sexo'] == 'M']
-        
-        machos_compatíveis = []
-        
-        for _, macho in machos.iterrows():
-            id_macho = macho['id_bufalo']
-            
-            # Simula acasalamento
-            simulacao = self.simular_acasalamento(id_macho, id_femea)
-            
-            # Verifica se está dentro do limite
-            if simulacao['consanguinidade_prole'] <= max_consanguinidade * 100:
-                machos_compatíveis.append({
-                    "id_macho": id_macho,
-                    "consanguinidade_prole": simulacao['consanguinidade_prole'],
-                    "parentesco_pais": simulacao['parentesco_pais'],
-                    "risco": simulacao['risco_consanguinidade'],
-                    "recomendacao": simulacao['recomendacao']
-                })
-        
-        # Ordena por consanguinidade (menor primeiro)
-        machos_compatíveis.sort(key=lambda x: x['consanguinidade_prole'])
-        
-        return machos_compatíveis
 
-def criar_arvore_genealogica(df_bufalos: pd.DataFrame) -> ArvoreGenealogica:
-    """
-    Função auxiliar para criar uma árvore genealógica.
-    
-    Args:
-        df_bufalos: DataFrame com dados dos búfalos
-        
-    Returns:
-        Instância de ArvoreGenealogica
-    """
-    return ArvoreGenealogica(df_bufalos)
+# --- Funções Auxiliares para serem chamadas pelo main.py ---
+# Mantém a compatibilidade com a sua API
+def criar_arvore_genealogica(df_bufalos: pd.DataFrame):
+    """Função de compatibilidade. O Calculador lida com o DataFrame diretamente."""
+    return df_bufalos

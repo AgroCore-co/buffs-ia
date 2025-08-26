@@ -11,5 +11,6 @@ __pycache__
 *.pkl.tar
 *.pkl.tar.gz
 mlruns/
+dados_benchmark_v1/
 modelo_producao_individual.joblib
 modelo_producao_individual_info.json
