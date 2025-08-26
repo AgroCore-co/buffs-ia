@@ -8,7 +8,10 @@ numpy
 scikit-learn
 joblib
 
-# Geração de Dados Fictícios
+# Versionamento e Rastreamento de Experimentos de IA
+mlflow
+
+# Geração de Dados Fictícios (se necessário para testes/simulação)
 Faker
 
 # Conexão com Banco de Dados (para o futuro)

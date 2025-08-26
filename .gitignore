@@ -10,3 +10,5 @@ __pycache__
 *.pkl.zip
 *.pkl.tar
 *.pkl.tar.gz
+mlruns/
+modelo_info.json
