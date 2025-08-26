@@ -8,11 +8,13 @@ numpy
 scikit-learn
 joblib
 
-# Versionamento e Rastreamento de Experimentos de IA
+# MLflow
 mlflow
 
-# Geração de Dados Fictícios (se necessário para testes/simulação)
+# Faker (para testes)
 Faker
 
-# Conexão com Banco de Dados (para o futuro)
+# ADIÇÃO: Conexão com Supabase
 psycopg2-binary
+python-dotenv
+SQLAlchemy>=1.4.0
