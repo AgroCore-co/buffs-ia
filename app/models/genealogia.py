@@ -111,6 +111,17 @@ class CalculadorConsanguinidade:
             "recomendacao": recomendacao
         }
 
+    def encontrar_machos_compatíveis(self, femea_id: int, max_consanguinidade_decimal: float) -> List[Dict]:
+        machos_compatíveis = []
+
+        for b in self._df_bufalos.to_dict("records"):
+            if b["sexo"] == "M":
+                sim = self.simular_acasalamento(b["id_bufalo"], femea_id)
+                if sim["consanguinidade_macho"] <= max_consanguinidade_decimal * 100:
+                    machos_compatíveis.append(sim)
+
+        return machos_compatíveis 
+
 # --- Funções Auxiliares para serem chamadas pelo main.py ---
 # Mantém a compatibilidade com a sua API
 def criar_arvore_genealogica(df_bufalos: pd.DataFrame):
