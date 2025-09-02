@@ -114,6 +114,14 @@ class CalculadorConsanguinidade:
     def encontrar_machos_compatíveis(self, femea_id: int, max_consanguinidade_decimal: float) -> List[Dict]:
         machos_compatíveis = []
 
+        femea_info = self._df_bufalos.loc[self._df_bufalos['id_bufalo'] == femea_id]
+
+        if femea_info.empty:
+            raise ValueError("Nenhum búfalo encontrado com o ID informado.")
+
+        if femea_info.iloc[0]["sexo"] != 'F':
+            raise ValueError("O ID informado não pertence a uma fêmea.")
+
         for b in self._df_bufalos.to_dict("records"):
             if b["sexo"] == "M":
                 sim = self.simular_acasalamento(b["id_bufalo"], femea_id)
@@ -122,7 +130,7 @@ class CalculadorConsanguinidade:
 
         return machos_compatíveis 
 
-# --- Funções Auxiliares para serem chamadas pelo main.py ---
+# --- Funções Auxiliayres para serem chamadas pelo main.py ---
 # Mantém a compatibilidade com a sua API
 def criar_arvore_genealogica(df_bufalos: pd.DataFrame):
     """Função de compatibilidade. O Calculador lida com o DataFrame diretamente."""
