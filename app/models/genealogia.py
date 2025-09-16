@@ -130,6 +130,42 @@ class CalculadorConsanguinidade:
 
         return machos_compatíveis 
 
+    def ranking_machos_por_potencial_filhas(self):
+        """
+        Retorna uma lista de machos ordenados pelo potencial genético médio de suas filhas.
+        """
+        # Filtra apenas fêmeas
+        femeas = self._df_bufalos[self._df_bufalos["sexo"] == "F"].copy()
+
+        # Agrupa por pai e calcula média e número de filhas
+        ranking = (
+            femeas.groupby("id_pai")["potencial_genetico_leite"]
+            .agg(media_potencial="mean", num_filhas="count")
+            .reset_index()
+        )
+
+        # Junta com dados dos machos para pegar informações adicionais
+        machos = self._df_bufalos[self._df_bufalos["sexo"] == "M"][["id_bufalo", "potencial_genetico_leite"]]
+        ranking = ranking.merge(
+            machos.rename(columns={
+                "id_bufalo": "id_pai",
+                "potencial_genetico_leite": "potencial_macho"
+            }),
+            on="id_pai",
+            how="left"
+        )
+
+        # Ordena do maior para o menor potencial médio das filhas
+        ranking = ranking.sort_values(by="media_potencial", ascending=False)
+
+        # Converte para lista de dicionários com tipos Python nativos
+        return (
+            ranking.astype(object)
+            .where(pd.notnull(ranking), None)
+            .to_dict(orient="records")
+        )
+
+
 # --- Funções Auxiliayres para serem chamadas pelo main.py ---
 # Mantém a compatibilidade com a sua API
 def criar_arvore_genealogica(df_bufalos: pd.DataFrame):

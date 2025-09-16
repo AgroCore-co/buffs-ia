@@ -433,6 +433,23 @@ def encontrar_machos_compatíveis(
         logger.error(f"ERRO NA BUSCA DE MACHOS COMPATÍVEIS: {e}")
         raise HTTPException(status_code=500, detail="Erro ao buscar machos compatíveis.")
 
+@app.get("/ranking-machos-por-potencial-filhas", tags=["Listar machos"])
+def listar_pais_filhas():
+    try:
+        arvore = criar_arvore_genealogica(df_historico_bufalos)
+        calculador = CalculadorConsanguinidade(arvore)
+
+        lista = calculador.ranking_machos_por_potencial_filhas()
+
+        return lista
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"ERRO AO OBTER LISTAGENS DE MACHOS COM FILHAS: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao obter informações da fêmea.")
+
+
 @app.get("/informacoes-femea/{femea_id}", tags=["Informações"])
 def obter_informacoes_femea_endpoint(femea_id: int):
     """Obtém informações básicas de uma fêmea."""
